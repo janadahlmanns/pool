@@ -58,6 +58,12 @@ float temp2 = 0.0;
 // --- HTTP Server ---
 WebServer server(80);
 
+// --- Heater Test ---
+bool heaterTestActive = false;
+unsigned long heaterTestStart = 0;
+float heaterTestResultPool = 0.0;
+float heaterTestResultSolar = 0.0;
+
 // --- Unified LCD Update ---
 void updateLCD(float temp_pool, float temp_solar, const String& pumpStat, const String& solarStat) {
   lcd.clear();
@@ -176,6 +182,46 @@ void StopValveMotion() {
   digitalWrite(CLOSE_GATE_PIN, LOW);
   valveMotion = IDLE;
   Serial.println("⏹️ Valve motion stopped");
+}
+
+// --- Start Heater Test ---
+void initiateHeaterTest() {
+  Serial.println("🧪 Initiating heater test...");
+  CallPump("on");
+  delay(1000);
+  OpenValve();
+  isValveOpen = true;
+  solarStatus = "ON";
+  delay(15000);  // wait for valve to fully open
+  StopValveMotion();
+
+  heaterTestStart = millis();
+  heaterTestActive = true;
+}
+
+// --- Finish Heater Test ---
+void finishHeaterTest() {
+  Serial.println("✅ Finishing heater test...");
+  sensor1.requestTemperatures();
+  sensor2.requestTemperatures();
+  delay(100);
+  heaterTestResultPool = sensor1.getTempCByIndex(0);
+  heaterTestResultSolar = sensor2.getTempCByIndex(0);
+
+  CloseValve();
+  isValveOpen = false;
+  solarStatus = "OFF";
+  delay(15000);  // wait for valve to close
+  StopValveMotion();
+  CallPump("off");
+
+  Serial.print("📊 Heater Test Result — Pool: ");
+  Serial.print(heaterTestResultPool);
+  Serial.print(" °C, Solar: ");
+  Serial.print(heaterTestResultSolar);
+  Serial.println(" °C");
+
+  heaterTestActive = false;
 }
 
 void setup() {
@@ -317,6 +363,24 @@ void loop() {
     Serial.print(temp2);
     Serial.println(" °C");
   }
+
+  // --- Heater Test regularly ---
+static unsigned long lastTest = 0;
+const unsigned long testInterval = 3600000UL; // 1 hour
+
+time_t nowTime = time(nullptr);
+struct tm* timeInfo = localtime(&nowTime);
+int currentHour = timeInfo->tm_hour;
+
+if (!heaterTestActive && millis() - lastTest > testInterval && currentHour >= 9 && currentHour < 16) {
+  initiateHeaterTest();
+  lastTest = millis();
+}
+
+if (heaterTestActive && millis() - heaterTestStart >= 5UL * 60UL * 1000UL) {
+  finishHeaterTest();
+}
+
 
   // --- Pump Status Polling ---
   static unsigned long lastPumpCheck = 0;
