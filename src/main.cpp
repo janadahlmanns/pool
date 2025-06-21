@@ -64,6 +64,11 @@ unsigned long heaterTestStart = 0;
 float heaterTestResultPool = 0.0;
 float heaterTestResultSolar = 0.0;
 
+// --- Pump time tally ---
+unsigned long pumpRunTimeToday = 0;
+unsigned long lastPumpStateChange = 0;
+bool previousPumpState = false;
+
 // --- Unified LCD Update ---
 void updateLCD(float temp_pool, float temp_solar, const String& pumpStat, const String& solarStat) {
   lcd.clear();
@@ -208,18 +213,27 @@ void finishHeaterTest() {
   heaterTestResultPool = sensor1.getTempCByIndex(0);
   heaterTestResultSolar = sensor2.getTempCByIndex(0);
 
-  CloseValve();
-  isValveOpen = false;
-  solarStatus = "OFF";
-  delay(15000);  // wait for valve to close
-  StopValveMotion();
-  CallPump("off");
-
   Serial.print("📊 Heater Test Result — Pool: ");
   Serial.print(heaterTestResultPool);
   Serial.print(" °C, Solar: ");
   Serial.print(heaterTestResultSolar);
   Serial.println(" °C");
+
+  if (heaterTestResultSolar > heaterTestResultPool + 0.5) {
+    Serial.println("🌞 Heater effective — keeping system ON");
+    isValveOpen = true;
+    solarStatus = "ON";
+    CallPump("on");
+    // leave valve open
+  } else {
+    Serial.println("⛅ Heater not effective — turning system OFF");
+    CloseValve();
+    delay(15000);  // wait for valve to fully close
+    StopValveMotion();
+    isValveOpen = false;
+    solarStatus = "OFF";
+    CallPump("off");
+  }
 
   heaterTestActive = false;
 }
@@ -253,6 +267,11 @@ void setup() {
   stateStartTime = millis();
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  previousPumpState = IsPumpOn();
+  if (previousPumpState) {
+    lastPumpStateChange = millis();  // assume it just started running now
+  }
 
   // --- HTTP Server Routes ---
   server.on("/", []() {
@@ -357,11 +376,13 @@ void loop() {
     temp1 = sensor1.getTempCByIndex(0);
     temp2 = sensor2.getTempCByIndex(0);
 
-    Serial.print("🌡️ Pool Temp: ");
-    Serial.print(temp1);
-    Serial.print(" °C | ☀️ Solar Temp: ");
-    Serial.print(temp2);
-    Serial.println(" °C");
+Serial.print("🌡️ Pool Temp: ");
+Serial.print(temp1);
+Serial.print(" °C | ☀️ Solar Temp: ");
+Serial.print(temp2);
+Serial.print(" °C | 🕒 Pump Run Today: ");
+Serial.print(pumpRunTimeToday / 60000);  // minutes
+Serial.println(" min");
   }
 
   // --- Heater Test regularly ---
@@ -382,12 +403,28 @@ if (heaterTestActive && millis() - heaterTestStart >= 5UL * 60UL * 1000UL) {
 }
 
 
-  // --- Pump Status Polling ---
-  static unsigned long lastPumpCheck = 0;
-  if (now - lastPumpCheck >= 10000) {
-    lastPumpCheck = now;
-    pumpStatus = IsPumpOn() ? "ON" : "OFF";
+// --- Pump Status Polling ---
+static unsigned long lastPumpCheck = 0;
+if (now - lastPumpCheck >= 10000) {
+  lastPumpCheck = now;
+  pumpStatus = IsPumpOn() ? "ON" : "OFF";
+
+  // 🧮 Track daily pump runtime
+  bool currentPumpState = (pumpStatus == "ON");
+  unsigned long nowMillis = millis();
+
+  if (previousPumpState && !currentPumpState) {
+    // Pump just turned off – accumulate time
+    pumpRunTimeToday += nowMillis - lastPumpStateChange;
   }
+
+  if (!previousPumpState && currentPumpState) {
+    // Pump just turned on – mark start time
+    lastPumpStateChange = nowMillis;
+  }
+
+  previousPumpState = currentPumpState;
+}
 
   updateLCD(temp1, temp2, pumpStatus, solarStatus);
 
