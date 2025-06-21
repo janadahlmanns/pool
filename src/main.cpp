@@ -14,7 +14,7 @@
 #define TEMP2_PIN 16     // Solar output temperature sensor
 #define OPEN_GATE_PIN 21
 #define CLOSE_GATE_PIN 22
-#define BUTTON_PIN 33
+#define BUTTON_PIN 33 
 
 // LCD pin definitions
 const int lcd_rs = 5;
