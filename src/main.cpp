@@ -68,6 +68,9 @@ float heaterTestResultSolar = 0.0;
 unsigned long pumpRunTimeToday = 0;
 unsigned long lastPumpStateChange = 0;
 bool previousPumpState = false;
+const unsigned long MIN_DAILY_RUNTIME = 3UL * 60UL * 60UL * 1000UL; // 3 hours in ms
+bool makeupRunActive = false;
+unsigned long makeupRunStart = 0;
 
 // --- Unified LCD Update ---
 void updateLCD(float temp_pool, float temp_solar, const String& pumpStat, const String& solarStat) {
@@ -424,6 +427,61 @@ if (now - lastPumpCheck >= 10000) {
   }
 
   previousPumpState = currentPumpState;
+}
+
+// --- 17:00 daily check for minimum runtime ---
+static bool did17hCheck = false;
+
+if (currentHour == 17 && !did17hCheck) {
+  Serial.println("🕔 17h check running...");
+
+  if (previousPumpState) {
+    // Add current open duration to total before checking
+    pumpRunTimeToday += millis() - lastPumpStateChange;
+    previousPumpState = false;
+  }
+
+  if (pumpRunTimeToday < MIN_DAILY_RUNTIME) {
+    unsigned long remaining = MIN_DAILY_RUNTIME - pumpRunTimeToday;
+    Serial.print("⚠️ Not enough runtime. Starting makeup run for ");
+    Serial.print(remaining / 60000);
+    Serial.println(" minutes");
+
+    CloseValve();
+    delay(15000);
+    StopValveMotion();
+    solarStatus = "OFF";
+    isValveOpen = false;
+
+    CallPump("on");
+    pumpStatus = "ON";
+    makeupRunStart = millis();
+    makeupRunActive = true;
+  } else {
+    Serial.println("✅ Minimum daily runtime met. Turning off pump and valve.");
+    CloseValve();
+    delay(15000);
+    StopValveMotion();
+    isValveOpen = false;
+    solarStatus = "OFF";
+    CallPump("off");
+    pumpStatus = "OFF";
+  }
+
+  // Reset tally for next day
+  pumpRunTimeToday = 0;
+  did17hCheck = true;
+}
+
+if (currentHour != 17) {
+  did17hCheck = false;  // reset for next day
+}
+
+if (makeupRunActive && millis() - makeupRunStart >= (MIN_DAILY_RUNTIME - pumpRunTimeToday)) {
+  Serial.println("🛑 Makeup run complete. Turning off pump.");
+  CallPump("off");
+  pumpStatus = "OFF";
+  makeupRunActive = false;
 }
 
   updateLCD(temp1, temp2, pumpStatus, solarStatus);
