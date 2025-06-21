@@ -14,7 +14,7 @@
 #define TEMP2_PIN 16     // Solar output temperature sensor
 #define OPEN_GATE_PIN 21
 #define CLOSE_GATE_PIN 22
-#define BUTTON_PIN 33 
+#define BUTTON_PIN 33
 
 // LCD pin definitions
 const int lcd_rs = 5;
@@ -188,6 +188,8 @@ void setup() {
   ArduinoOTA.begin();
   Serial.println("OTA ready");
 
+  configTime(3600, 3600, "pool.ntp.org", "time.nist.gov");
+
   sensor1.begin();
   sensor2.begin();
 
@@ -226,15 +228,22 @@ void setup() {
     server.send(200, "text/plain", "Valve toggled");
   });
 
-  server.on("/status", []() {
-    String json = "{";
-    json += "\"temp_pool\":" + String(temp1) + ",";
-    json += "\"temp_solar\":" + String(temp2) + ",";
-    json += "\"pump\":\"" + pumpStatus + "\",";
-    json += "\"valve\":\"" + String(isValveOpen ? "open" : "closed") + "\"";
-    json += "}";
-    server.send(200, "application/json", json);
-  });
+server.on("/status", []() {
+  time_t rawTime = time(nullptr);
+  struct tm* timeInfo = localtime(&rawTime);
+  char buffer[25];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
+  String timestamp = String(buffer);
+
+  String json = "{";
+  json += "\"temp_pool\":" + String(temp1) + ",";
+  json += "\"temp_solar\":" + String(temp2) + ",";
+  json += "\"pump\":\"" + pumpStatus + "\",";
+  json += "\"valve\":\"" + String(isValveOpen ? "open" : "closed") + "\",";
+  json += "\"timestamp\":\"" + timestamp + "\"";
+  json += "}";
+  server.send(200, "application/json", json);
+});
 
   server.begin();
   Serial.println("🌐 HTTP server started");
