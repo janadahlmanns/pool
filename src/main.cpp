@@ -241,6 +241,10 @@ void finishHeaterTest() {
   heaterTestActive = false;
 }
 
+
+// --- ========================================= ---
+// --- =========== SETUP ======================= ---
+// --- ========================================= ---
 void setup() {
   Serial.begin(115200);
 
@@ -313,10 +317,34 @@ server.on("/status", []() {
   server.send(200, "application/json", json);
 });
 
+server.on("/heater-on", HTTP_POST, []() {
+  Serial.println("🔆 Manual heater ON request received");
+  CallPump("on");
+  OpenValve();
+  isValveOpen = true;
+  solarStatus = "ON";
+  valveMotionStart = millis();
+  valveMotion = OPENING_MOTION;
+  server.send(200, "application/json", "{\"status\":\"Heater turned on\"}");
+});
+
+server.on("/heater-off", HTTP_POST, []() {
+  Serial.println("🌙 Manual heater OFF request received");
+  CloseValve();
+  isValveOpen = false;
+  solarStatus = "OFF";
+  valveMotionStart = millis();
+  valveMotion = CLOSING_MOTION;
+  server.send(200, "application/json", "{\"status\":\"Heater turned off\"}");
+});
+
   server.begin();
   Serial.println("🌐 HTTP server started");
 }
 
+// --- ========================================= ---
+// --- =========== LOOP ======================== ---
+// --- ========================================= ---
 void loop() {
   // --- WiFi Watchdog ---
   static unsigned long lastWiFiCheck = 0;
