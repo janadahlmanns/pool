@@ -306,12 +306,14 @@ server.on("/status", []() {
   char buffer[25];
   strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
   String timestamp = String(buffer);
+  unsigned long runtimeMinutes = pumpRunTimeToday / 60000;
 
   String json = "{";
   json += "\"temp_pool\":" + String(temp1) + ",";
   json += "\"temp_solar\":" + String(temp2) + ",";
   json += "\"pump\":\"" + pumpStatus + "\",";
   json += "\"valve\":\"" + String(isValveOpen ? "open" : "closed") + "\",";
+  json += "\"pump_runtime_min\":" + String(runtimeMinutes) + ",";
   json += "\"timestamp\":\"" + timestamp + "\"";
   json += "}";
   server.send(200, "application/json", json);
