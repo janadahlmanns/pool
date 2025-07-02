@@ -47,6 +47,9 @@ unsigned long valveMotionStart = 0;
 unsigned long manualOverrideStart = 0;
 bool manualOverrideActive = false;
 
+// --- Manual Mode Toggle ---
+bool automationEnabled = true;
+
 // --- Status ---
 String pumpStatus = "OFF";
 String solarStatus = "OFF";
@@ -241,7 +244,24 @@ void finishHeaterTest() {
   heaterTestActive = false;
 }
 
+void sendStatus() {
+  time_t rawTime = time(nullptr);
+  struct tm* timeInfo = localtime(&rawTime);
+  char buffer[25];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
+  String timestamp = String(buffer);
+  unsigned long runtimeMinutes = pumpRunTimeToday / 60000;
 
+  String json = "{";
+  json += "\"temp_pool\":" + String(temp1) + ",";
+  json += "\"temp_solar\":" + String(temp2) + ",";
+  json += "\"pump\":\"" + pumpStatus + "\",";
+  json += "\"valve\":\"" + String(isValveOpen ? "open" : "closed") + "\",";
+  json += "\"pump_runtime_min\":" + String(runtimeMinutes) + ",";
+  json += "\"timestamp\":\"" + timestamp + "\"";
+  json += "}";
+  server.send(200, "application/json", json);
+}
 // --- ========================================= ---
 // --- =========== SETUP ======================= ---
 // --- ========================================= ---
@@ -282,10 +302,16 @@ void setup() {
 
   // --- HTTP Server Routes ---
   server.on("/", []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "*");
     server.send(200, "text/plain", "ESP32 Pool Controller Ready");
   });
 
   server.on("/valve/toggle", []() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "*");
     if (isValveOpen) {
       CloseValve();
       solarStatus = "OFF";
@@ -300,26 +326,30 @@ void setup() {
     server.send(200, "text/plain", "Valve toggled");
   });
 
-server.on("/status", []() {
-  time_t rawTime = time(nullptr);
-  struct tm* timeInfo = localtime(&rawTime);
-  char buffer[25];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeInfo);
-  String timestamp = String(buffer);
-  unsigned long runtimeMinutes = pumpRunTimeToday / 60000;
+  server.on("/status", []() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "*");
+    sendStatus();
+  });
 
-  String json = "{";
-  json += "\"temp_pool\":" + String(temp1) + ",";
-  json += "\"temp_solar\":" + String(temp2) + ",";
-  json += "\"pump\":\"" + pumpStatus + "\",";
-  json += "\"valve\":\"" + String(isValveOpen ? "open" : "closed") + "\",";
-  json += "\"pump_runtime_min\":" + String(runtimeMinutes) + ",";
-  json += "\"timestamp\":\"" + timestamp + "\"";
-  json += "}";
-  server.send(200, "application/json", json);
-});
+  server.on("/status-now", []() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "*");
+    sensor1.requestTemperatures();
+    sensor2.requestTemperatures();
+    delay(100);
+    temp1 = sensor1.getTempCByIndex(0);
+    temp2 = sensor2.getTempCByIndex(0);
+    pumpStatus = IsPumpOn() ? "ON" : "OFF";
+    sendStatus();
+  });
 
 server.on("/heater-on", HTTP_POST, []() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "*");
   Serial.println("🔆 Manual heater ON request received");
   CallPump("on");
   OpenValve();
@@ -331,6 +361,9 @@ server.on("/heater-on", HTTP_POST, []() {
 });
 
 server.on("/heater-off", HTTP_POST, []() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "*");
   Serial.println("🌙 Manual heater OFF request received");
   CloseValve();
   isValveOpen = false;
@@ -338,6 +371,36 @@ server.on("/heater-off", HTTP_POST, []() {
   valveMotionStart = millis();
   valveMotion = CLOSING_MOTION;
   server.send(200, "application/json", "{\"status\":\"Heater turned off\"}");
+});
+
+server.on("/automation/status", HTTP_GET, []() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", automationEnabled ? "{\"automation\": true}" : "{\"automation\": false}");
+});
+
+server.on("/automation/on", HTTP_POST, []() {
+  automationEnabled = true;
+  Serial.println("⚙️  Automation mode ENABLED via HTTP");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", "{\"status\":\"automation enabled\"}");
+});
+
+server.on("/automation/off", HTTP_POST, []() {
+  automationEnabled = false;
+  Serial.println("🛠️  Automation mode DISABLED via HTTP");
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", "{\"status\":\"automation disabled\"}");
+});
+
+server.onNotFound([]() {
+  if (server.method() == HTTP_OPTIONS) {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "*");
+    server.send(204); // No Content
+  } else {
+    server.send(404, "text/plain", "Not Found");
+  }
 });
 
   server.begin();
@@ -426,7 +489,7 @@ time_t nowTime = time(nullptr);
 struct tm* timeInfo = localtime(&nowTime);
 int currentHour = timeInfo->tm_hour;
 
-if (!heaterTestActive && millis() - lastTest > testInterval && currentHour >= 9 && currentHour < 16) {
+if (automationEnabled && !heaterTestActive && millis() - lastTest > testInterval && currentHour >= 9 && currentHour < 16) {
   initiateHeaterTest();
   lastTest = millis();
 }
